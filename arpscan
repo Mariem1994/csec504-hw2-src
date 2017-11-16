@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+
+# arpscan -- Simple host discovery scanner based on the 'arping' tool.
+# Author: Oral Okan
+
+from subprocess import Popen, PIPE, TimeoutExpired
+from time import sleep
+from ipaddress import ip_network
+
+import re
+import argparse
+import sys
+
+def resolve_mac(iface, target, timeout):
+    proc = Popen(
+        ["arping", "-f", "-I", iface, target],
+        universal_newlines=True,
+        stdout=PIPE,
+        stderr=PIPE)
+    try:
+        outs, errs = proc.communicate(timeout=timeout)
+    except TimeoutExpired:      # Assume host is down
+        proc.kill()
+        outs, errs = proc.communicate()
+        return None
+
+    if (proc.poll() != 0):      # arping failed
+        print(errs)
+        sys.exit(1)
+    
+    m = re.search(r"\[([0-9A-F]{2}:){5}[0-9A-F]{2}\]", outs) # regex for MAC address
+    if m is None:
+        return None
+
+    mac_addr = m.group(0)[1:-1] # remove surrounding square braces
+    return mac_addr
+
+def scan(iface, network_address, timeout):
+    results = []
+    ip_addr_list = [ip_addr.compressed for ip_addr in ip_network(network_address)][1:-1]
+    for ip_addr in ip_addr_list:
+        sys.stdout.write("\r" + ip_addr + '    ')
+        mac_addr = resolve_mac(iface, ip_addr, timeout)
+        if mac_addr is not None:
+            results.append((ip_addr, mac_addr))
+            sys.stdout.write("-> " + mac_addr + "\n")
+    sys.stdout.write("\r")
+    return results
+
+def format_output(results):
+    formatted = ""
+    for ip_addr, mac_addr in results:
+        formatted += "{} {} -\n".format(ip_addr, mac_addr)
+    return formatted
+        
+def main():
+    print("CSEC 504 HW #2 - arpscan")
+    parser = argparse.ArgumentParser(description="ARP Scanner")
+    parser.add_argument('-o', required=True, help='')
+    parser.add_argument('-t', type=float, nargs='?', default=100, help='')
+    parser.add_argument('iface', help='')
+    parser.add_argument('netaddr', help='')
+
+    args = parser.parse_args()
+
+    print("Starting Scan")
+    print("Target Network: {}".format(args.netaddr))
+
+    scan_result = scan(args.iface, args.netaddr, timeout=args.t/1000)
+
+    print("Scan Completed")
+        
+    fmt_result = format_output(scan_result)
+
+    with open(args.o, 'w') as f:
+        f.write(fmt_result)
+
+if __name__ == "__main__":
+    main()
+
